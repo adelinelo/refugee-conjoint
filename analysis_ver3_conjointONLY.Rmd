@@ -1,0 +1,670 @@
+---
+title: "analysis_ver1_conjointONLY"
+author: "Adeline Lo"
+date: "12/17/2017"
+output: html_document
+---
+
+Analyzed observations are Controls only, BOTH Waves 1 and 2. 
+
+While the original PAP proposed two outcomes of interest for the conjoint experiment, a forced-choice of which of a pair of profiles a respondent chooses, as well as a profile rating for each profile, this analysis focuses on the profile rating alone. The AMCE for the profile rating can be estimated in an unbiased and consistent manner, as is proposed in Hainmueller et al. 2014. However, it has come to our attention that the current approach of marginalizing across attributes in the forced-choice outcome does not appropriately account for the necessary dependence of each pair of profiles. Choosing profile A inherently means not choosing profile B. That is, marginalizing across the attributes currently considers each of the two profiles as independent; a forced-choice scenario inherently ties the probability of choice of one profile with the probability of choice for the other. An appropriate approach, outside the scope of this paper, would likely account the dependence between profiles and marginalizing attributes across profiles as well as within. The rating outcome on the other hand, collected for each profile, does not suffer from this type of dependence. As such, we focus on this outcome of interest throughout.
+
+```{r set-options, echo=FALSE, cache=FALSE}
+options(width = 1000)
+```
+# Conjoint Analysis
+```{r}
+library(cjoint)
+library(sandwich)
+library(ggplot2)
+library(stringr)
+load("cleandata.RData")
+```
+
+# Functions
+```{r}
+ clx.cov <-function(fm, cluster=NULL){
+   if(length(cluster)!=0){
+      M <- length(unique(cluster))
+      dfcw <- fm$df / (fm$df - (M -1))
+      N <- length(cluster)
+      dfc <- (M/(M-1))*((N-1)/(N-fm$rank))
+      u <- apply(estfun(fm),2,
+      function(x) tapply(x, cluster, sum))
+      vcovCL <- dfc*sandwich(fm, meat=crossprod(u)/N)*dfcw
+      #coeftest(fm, vcovCL) 
+      return(vcovCL)
+      }
+   else{
+     vcovR<-vcovHC(fm,sandwich=TRUE,type="HC")#heteroskedastic consistent cov matrix estimation, with White's estimator
+     #coeftest(fm,vcovR)
+     return(vcovR)
+   }
+ }
+
+predict.clrob <- function(x,clcov,newdata){#takes cluster robust vcov matrix
+if(missing(newdata)){ newdata <- x$model }
+tt <- terms(x)
+Terms <- delete.response(tt)
+m.mat <- model.matrix(Terms,data=newdata)
+m.coef <- x$coef
+fit <- as.vector(m.mat %*% x$coef)
+se.fit <- sqrt(diag(m.mat%*%clcov%*%t(m.mat)))
+return(list(fit=fit,se.fit=se.fit))}
+```
+
+# Y2
+Analyses
+```{r}
+#format of data should be data.y2 for the Y2 outcome
+namea=names(data.y2)%in%c("caseid","pair","weight","weight_all","Rsex","Rage","Renglish","Rjob","Rmuslim","wave","y2","treatment","partyid3_names","gender","birthyr1","race","educ1","ethnocentric2","refugee1or2","religpew")
+conjoint.y2=data.y2[namea]
+names(conjoint.y2)=c("caseid","weight","weight_all","Gender","Race","Resp. Religion","Party", "Ethnocentric","Birth-year","Education", "Wave","treatment","y2","Sex","Age","English","Job","Religion","pair","refugee1or2")#note Gender is for respondent, Sex is for profile refugee
+conjoint.y2 <- conjoint.y2[order(conjoint.y2$caseid, conjoint.y2$pair),] 
+conjoint.y2$`Resp. Religion`=factor(conjoint.y2$`Resp. Religion`, labels=c("Protestant","Roman Catholic", "Mormon","Eastern/Greek Orthodox","Jewish","Muslim",
+                                                                           "Buddhist","Hindu","Atheist","Agnostic","Nothing","Other"))
+conjoint.y2$Christian=as.factor(ifelse(conjoint.y2$`Resp. Religion`=="Protestant"|conjoint.y2$`Resp. Religion`=="Roman Catholic"|conjoint.y2$`Resp. Religion`=="Mormon"|conjoint.y2$`Resp. Religion`=="Eastern/Greek Orthodox",1,0))
+conjoint.y2$Ethnocentric = factor(conjoint.y2$Ethnocentric, labels=c("Low","Middle","High"))
+conjoint.y2$Sex = factor(conjoint.y2$Sex,labels=c("F","M"))
+conjoint.y2$Age=factor(conjoint.y2$Age,labels=c(20,40,60))
+conjoint.y2$English=factor(conjoint.y2$English,labels=c("Fluent","Broken","None"))
+conjoint.y2$Job=factor(conjoint.y2$Job,labels=c("Farmer","Teacher","Doctor"))
+conjoint.y2$Religion=factor(conjoint.y2$Religion,labels=c("Christian","Muslim"))
+conjoint.y2$treatment=factor(conjoint.y2$treatment)
+conjoint.y2$Gender=factor(conjoint.y2$Gender,labels=c("M","F"))
+conjoint.y2$Race=factor(conjoint.y2$Race,labels=c("White","Black","Hispanic","Asian","Native American","Mixed","Other","Middle Eastern"))
+conjoint.y2$Race2=as.factor(ifelse(conjoint.y2$Race!="White","Non-white","White"))#white vs nonwhite
+conjoint.y2$`Resp. Age`=as.factor(ifelse(conjoint.y2$`Birth-year`<1971,"Over 45",ifelse(conjoint.y2$`Birth-year`>=1986, "30 and under","31-45")))
+conjoint.y2$Education=as.factor(ifelse(conjoint.y2$Education==1|conjoint.y2$Education==2,"HS",ifelse(conjoint.y2$Education==3|conjoint.y2$Education==4|conjoint.y2$Education==5,"College","Postgrad")))
+
+conjoint.y2.w1=subset(conjoint.y2,subset=Wave==0)
+conjoint.y2.controlw1=subset(conjoint.y2,subset= treatment == "Control" & Wave==0)
+conjoint.y2.control=subset(conjoint.y2,subset=treatment=="Control")
+```
+
+
+## AMCE of all profile attributes
+```{r}
+out6 <- amce(y2 ~ Sex + Age + English + Job + Religion, data=conjoint.y2.control,cluster=TRUE,respondent.id="caseid")
+summary.amce(out6)
+```
+Among control respondents across both waves, there are preferences along each attribute. 40 year olds are preferred against 20 year olds; English fluency is preferred. Doctors and teachers are both preferred compared to farmers. There is a Muslim bias, and female profiles are preferred against male profiles.
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out6, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE" )
+#amce-basic
+```
+
+
+## AMCE estimator using all attributes with interactions
+JEPs
+```{r}
+out7 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=conjoint.y2.control,cluster=TRUE,respondent.id="caseid")
+summary.amce(out7)
+
+
+#out7 <- amce(y2 ~ Sex + Age + English + Job + Religion + refugee1or2
+              #+ Sex:Age + Sex:English + Sex:Job + Sex:Religion + Sex:refugee1or2
+              #+ Age:English + Age:Job + Age:Religion + Age:refugee1or2
+              #+ English:Job + English:Religion + English:refugee1or2
+              #+ Job:Religion + Job:refugee1or2
+              #+ Religion:refugee1or2, data=conjoint.y2.control,cluster=TRUE,respondent.id="caseid")
+
+#summary.amce(out7)
+```
+Male farmers are preferred against male doctors. Doctors with broken english are preferred against farmers with fluent english. No ACIE for Religion*Sex.
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out7, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE" )
+#amce-interactions
+```
+
+## Breaking down by party ID
+
+### Democrats
+```{r}
+out9 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion
+             , data=subset(conjoint.y2.control,Party=="Democrat"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out9)
+
+#without interactions
+out9b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,Party=="Democrat"),cluster=TRUE, respondent.id="caseid")
+```
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out9, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Democrat",xlim=c(-0.75,0.75)  )
+#amce-democrat
+
+#without interactions
+plot(out9b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Democrat",xlim=c(-1,1)  )
+#amce-democrat-basic
+```
+
+### Republicans
+```{r}
+out9 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion
+             , data=subset(conjoint.y2.control,Party=="Republican"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out9)
+
+#without interactions
+out9b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,Party=="Republican"),cluster=TRUE, respondent.id="caseid")
+```
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out9, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Republican",xlim=c(-0.75,0.75)  )
+#amce-republican
+
+#without interactions
+plot(out9b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Republican",xlim=c(-1,1)  )
+#amce-republican-basic
+```
+
+### Independents
+```{r}
+out9 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion
+             , data=subset(conjoint.y2.control,Party=="Independent"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out9)
+#without interactions
+out9b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,Party=="Independent"),cluster=TRUE, respondent.id="caseid")
+```
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out9, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Independent",xlim=c(-0.75,0.75)  )
+#amce-independent
+
+#without interactions
+plot(out9b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Independent",xlim=c(-1,1)  )
+#amce-independent-basic
+```
+
+## Breaking down by gender
+
+### Male respondents
+```{r}
+out10 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=subset(conjoint.y2.control,Gender=="M"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out10)
+
+#without interactions
+out10b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,Gender=="M"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out10b)
+```
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out10, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Male" )
+#amce-male
+
+#without interactions
+plot(out10b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Male",xlim=c(-0.75,0.75))
+#amce-male-basic
+```
+
+### Female respondents
+```{r}
+out10 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=subset(conjoint.y2.control,Gender=="F"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out10)
+
+#without interactions
+out10b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,Gender=="F"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out10b)
+```
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out10, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Female" )
+#amce-female
+
+#without interactions
+plot(out10b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Female",xlim=c(-0.75,0.75))
+#amce-female-basic
+```
+
+
+
+## Breaking down by educ level
+
+### HS
+```{r}
+out11 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=subset(conjoint.y2.control,subset=Education=="HS"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out11)
+
+#without interactions
+out11b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,Education=="HS"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out11b)
+```
+
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out11, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if HS education",xlim=c(-1.25,1.25) )
+#amce-hs
+plot(out11b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if HS education",xlim=c(-1,1) )
+#without interactions
+```
+
+
+
+### College
+```{r}
+out11 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=subset(conjoint.y2.control,subset=Education=="College"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out11)
+
+#without interactions
+out11b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,Education=="College"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out11b)
+```
+
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out11, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if College education",xlim=c(-1.25,1.25) )
+#amce-college
+
+#without interactions
+plot(out11b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if College education",xlim=c(-1,1) )
+#amce-college-basic
+
+```
+
+
+
+### Postgrad
+```{r}
+out11 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=subset(conjoint.y2.control,subset=Education=="Postgrad"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out11)
+
+#without interactions
+out11b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,Education=="Postgrad"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out11b)
+```
+
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out11, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Postgrad education",xlim=c(-1.25,1.25) )
+#amce-postgrad
+
+#without interactions
+plot(out11b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Postgrad education",xlim=c(-1,1) )
+#amce-postgrad-basic
+
+```
+
+
+
+
+
+## Breaking down by  age
+
+### <30
+```{r}
+out12 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=subset(conjoint.y2.control,subset=`Resp. Age`=="30 and under"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out12)
+
+#without interactions
+out12b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,`Resp. Age`=="30 and under"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out12b)
+```
+
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out12, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if 30 and under",xlim=c(-1,1) )
+#amce-30
+
+#without interactions
+plot(out12b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if 30 and under",xlim=c(-0.75,0.75) )
+#amce-30-basic
+```
+
+
+
+
+
+### 30-45
+```{r}
+out12 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=subset(conjoint.y2.control,subset=`Resp. Age`=="31-45"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out12)
+
+#without interactions
+out12b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,`Resp. Age`=="31-45"),cluster=TRUE, respondent.id="caseid")
+```
+
+There is a Muslim-male bias amongst 30-45 year olds.
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out12, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if 31-45 y/o",xlim=c(-1,1) )
+#amce-30-45
+
+#without interactions
+plot(out12b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if 31-45 y/o",xlim=c(-0.75,0.75) )
+#amce-30-45-basic
+```
+
+
+### >45
+```{r}
+out12 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=subset(conjoint.y2.control,subset=`Resp. Age`=="Over 45"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out12)
+
+#without interactions
+out12b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,`Resp. Age`=="Over 45"),cluster=TRUE, respondent.id="caseid")
+```
+
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out12, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if over 45 y/o " ,xlim=c(-1,1))
+#amce-45
+
+#without interactions
+plot(out12b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if over 45 y/o" ,xlim=c(-0.75,0.75))
+#amce-45-basic
+```
+
+
+
+## Breaking down by  race
+
+### White
+```{r}
+out14 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=subset(conjoint.y2.control,subset=Race2=="White"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out14)
+
+#without interactions
+out14b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,Race2=="White"),cluster=TRUE, respondent.id="caseid")
+```
+
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out14, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if White ",xlim=c(-0.75,0.75)  )
+#amce-white
+
+#without interactions
+plot(out14b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if White",xlim=c(-0.75,0.75) )
+#amce-white-basic
+```
+
+
+
+
+
+
+### Non-white
+
+```{r}
+out14 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=subset(conjoint.y2.control,subset=Race2=="Non-white"),cluster=TRUE, respondent.id="caseid")
+summary.amce(out14)
+
+#without interactions
+out14b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,Race2=="Non-white"),cluster=TRUE, respondent.id="caseid")
+```
+
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out14, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Non-white ",xlim=c(-0.75,0.75) )
+#amce-nonwhite
+
+#without interactions
+plot(out14b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Non-white",xlim=c(-0.75,0.75) )
+#amce-nonwhite-basic
+```
+
+
+
+## Breaking down by religion
+
+### Christian
+
+```{r}
+out15 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=subset(conjoint.y2.control,subset=Christian==1),cluster=TRUE, respondent.id="caseid")
+summary.amce(out15)
+
+#without interactions
+out15b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,Christian==1),cluster=TRUE, respondent.id="caseid")
+```
+
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out15, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Christian ",xlim=c(-0.75,0.75)  )
+#amce-christian
+
+#without interactions
+plot(out15b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if Christian",xlim=c(-0.75,0.75)  )
+#amce-christian-basic
+```
+
+
+
+
+
+
+
+### Non-Christian
+
+```{r}
+out15 <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=subset(conjoint.y2.control,subset=Christian==0),cluster=TRUE, respondent.id="caseid")
+summary.amce(out15)
+
+#without interactions
+out15b <- amce(y2 ~ Sex + Age + English + Job + Religion, data=subset(conjoint.y2.control,Christian==0),cluster=TRUE, respondent.id="caseid")
+```
+
+
+AMCE plot:
+```{r}
+# Plot amce estimating using all attributes - control only
+plot(out15, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if not Christian ",xlim=c(-0.75,0.75)  )
+#amce-notchristian
+
+#without interactions
+plot(out15b, xlab="Change in Rating",ylim=c(0,4),text.size=13, main="AMCE if not Christian",xlim=c(-0.75,0.75)  )
+#amce-notchristian-basic
+```
+
+
+
+
+
+
+
+
+## Finding 'best' and 'worst' profiles
+
+
+```{r}
+#best1 <- amce(y2 ~ (Sex + Age + English + Job + Religion)^5, data=conjoint.y2.control,cluster=TRUE,respondent.id="caseid")
+#summary(best1)
+
+#All prediction types for all types of profiles
+new.best=as.data.frame(matrix(NA,ncol=5,nrow=108))
+names(new.best)=c("Sex","Age","English","Job","Religion")
+#possible profiles: 2*3*3*3*2=108
+new.best$Sex=factor(rep(c("M","F"),each=3*3*3*2))
+new.best$Age=factor(rep(c(rep("20",2*3*3),rep("40",2*3*3),rep("60",2*3*3)),2)) 
+new.best$English=factor(rep(c(rep("Fluent",2*3),rep("Broken",2*3),rep("None",2*3)),3*2))    #(rep(c("Fluent","Broken","None"),2*3*3*2))
+new.best$Job=factor(rep(c(rep("Farmer",2),rep("Teacher",2),rep("Doctor",2)),3*3*2))
+new.best$Religion=factor(rep(c("Christian","Muslim"),3*3*3*2))
+
+mod1=lm(y2~(Sex + Age + English + Job + Religion),data=conjoint.y2.control)
+mod1.pred=predict.clrob(mod1,clx.cov(mod1,conjoint.y2.control$caseid),newdata=new.best)
+
+#find 1%, 25%, 50%, 75%, 99%
+find=as.data.frame(matrix(NA,nrow=length(mod1.pred$fit),ncol=7))
+find[,1:5]=new.best[,1:5]
+find[,6]=mod1.pred$fit
+find[,7]=mod1.pred$se.fit
+names(find)=c(names(new.best),"Estimate","SE")
+find=find[order(find$Estimate),]
+
+index=c(find[round(.01*108),1],find[round(.25*108),1],find[round(.5*108),1],find[round(.75*108),1],find[round(.99*108),1])#c(12,58,99,108)
+
+#profiles
+plot.data=as.data.frame(cbind(new.best[index,],find[c(round(.01*108),round(.25*108),round(.5*108),round(.75*108),round(.99*108)),6:7]))
+names(plot.data)=c("Sex","Age","English","Job","Religion","Predicted Rating","SE")
+plot.data$Lower<-plot.data$`Predicted Rating`- qnorm(0.975)*plot.data$SE
+plot.data$Upper<-plot.data$`Predicted Rating`+ qnorm(0.975)*plot.data$SE
+plot.data$Lower90<-plot.data$`Predicted Rating`- qnorm(0.95)*plot.data$SE
+plot.data$Upper90<-plot.data$`Predicted Rating`+ qnorm(0.95)*plot.data$SE
+plot.data$Profiles<-str_wrap(c("percentile 1: 20 y/o Male,   No English, Doctor, Muslim","percentile 25: 40 y/o Female, Fluent English, Doctor, Muslim","percentile 50: 60 y/o Female, No English, Doctor, Christian","percentile 75: 60 y/o Male, Broken English, Doctor, Christian","percentile 99: 60 y/o Female, Broken English, Teacher, Christian"),width=30)
+#plot
+plot1 <- ggplot(plot.data, aes(x=Profiles, y=`Predicted Rating`, 
+                      colour="gray20"),xlab="Predicted Rating for Selected Refugee Profiles") + 
+            theme_bw() +
+            ylim(2,6) +
+            geom_point(size=5,col=c("gray20")) + 
+            geom_linerange(mapping=aes(x=Profiles, ymin=Upper, ymax=Lower),size=.5, color=c("gray20")) +
+            geom_linerange(mapping=aes(x=Profiles, ymin=Upper90, ymax=Lower90),size=1.5, color=c("gray20")) +
+            geom_hline(yintercept=3.5,linetype = 'dashed',col="gray")  +
+            coord_flip() +
+            theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                  #panel.background = element_rect(colour = "black", size=3),
+                  legend.position="none"
+                  #,axis.title.x = element_blank()
+                  )
+#range-profiles-predicted-rating
+plot1
+
+## Specific profiles:
+find$Profile1=ifelse(find$Sex=="F"&find$Age==40&find$English=="Fluent"&find$Religion=="Christian"&find$Job=="Doctor",1,0)
+find$Profile2=ifelse(find$Sex=="F"&find$Age==40&find$English=="Broken"&find$Religion=="Christian"&find$Job=="Doctor",1,0)
+find$Profile3=ifelse(find$Sex=="F"&find$Age==40&find$English=="Fluent"&find$Religion=="Muslim"&find$Job=="Doctor",1,0)
+find$Profile4=ifelse(find$Sex=="M"&find$Age==40&find$English=="Fluent"&find$Religion=="Christian"&find$Job=="Doctor",1,0)
+index2=c(which(find$Profile1 == 1),which(find$Profile2 == 1),which(find$Profile3 == 1),which(find$Profile4 == 1))
+percentiles=index2/108
+plot.data2=as.data.frame(cbind(find[index2,],percentiles))
+names(plot.data2)=c("Sex","Age","English","Job","Religion","Predicted Rating","SE","Profile1","Profile2","Profile3","Profile4","Percentile")
+plot.data2$Profiles<-str_wrap(c("percentile 74%: 40 y/o Female, Fluent English, Doctor, Christian","percentile 92: 40 y/o Female, Broken English, Doctor, Christian","percentile 25: 40 y/o Female, Fluent English, Doctor, Muslim","percentile 56: 40 y/o Male, Fluent English, Doctor, Christian"),width=30)
+
+plot.data2$Lower<-plot.data2$`Predicted Rating`- qnorm(0.975)*plot.data2$SE
+plot.data2$Upper<-plot.data2$`Predicted Rating`+ qnorm(0.975)*plot.data2$SE
+plot.data2$Lower90<-plot.data2$`Predicted Rating`- qnorm(0.95)*plot.data2$SE
+plot.data2$Upper90<-plot.data2$`Predicted Rating`+ qnorm(0.95)*plot.data2$SE
+#plot
+plot2 <- ggplot(plot.data2, aes(x=Profiles, y=`Predicted Rating`, 
+                      colour="gray20"),xlab="Predicted Rating for Selected Refugee Profiles") + 
+            theme_bw() +
+            ylim(2,6) +
+            geom_point(size=5,col=c("gray20")) + 
+            geom_linerange(mapping=aes(x=Profiles, ymin=Upper, ymax=Lower),size=.5, color=c("gray20")) +
+            geom_linerange(mapping=aes(x=Profiles, ymin=Upper90, ymax=Lower90),size=1.5, color=c("gray20")) +
+            geom_hline(yintercept=3.5,linetype = 'dashed',col="gray")  +
+            coord_flip() +
+            theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                  #panel.background = element_rect(colour = "black", size=3),
+                  legend.position="none"
+                  #,axis.title.x = element_blank()
+                  )
+#selected-profiles-predicted-rating
+plot2
+
+```
+
+
+
+## AMCE with weights
+
+###Basic
+```{r}
+out <- amce(y2 ~ Sex + Age + English + Job + Religion, data=conjoint.y2.control,cluster=TRUE,respondent.id="caseid",weights="weight")
+summary.amce(out)
+```
+
+
+### Interactions
+```{r}
+out <- amce(y2 ~ Sex + Age + English + Job + Religion
+              + Sex:Age + Sex:English + Sex:Job + Sex:Religion
+              + Age:English + Age:Job + Age:Religion
+              + English:Job + English:Religion
+              + Job:Religion, data=conjoint.y2.control,cluster=TRUE,respondent.id="caseid",weights="weight")
+summary.amce(out)
+```
