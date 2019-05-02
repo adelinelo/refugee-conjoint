@@ -5,7 +5,7 @@ date: "12/17/2017"
 output: html_document
 ---
 
-Analyzed observations are Controls only, BOTH Waves 1 and 2. 
+Data collected from conjoint experiment conducted fall 2016.
 
 While the original PAP proposed two outcomes of interest for the conjoint experiment, a forced-choice of which of a pair of profiles a respondent chooses, as well as a profile rating for each profile, this analysis focuses on the profile rating alone. The AMCE for the profile rating can be estimated in an unbiased and consistent manner, as is proposed in Hainmueller et al. 2014. However, it has come to our attention that the current approach of marginalizing across attributes in the forced-choice outcome does not appropriately account for the necessary dependence of each pair of profiles. Choosing profile A inherently means not choosing profile B. That is, marginalizing across the attributes currently considers each of the two profiles as independent; a forced-choice scenario inherently ties the probability of choice of one profile with the probability of choice for the other. An appropriate approach, outside the scope of this paper, would likely account the dependence between profiles and marginalizing attributes across profiles as well as within. The rating outcome on the other hand, collected for each profile, does not suffer from this type of dependence. As such, we focus on this outcome of interest throughout.
 
